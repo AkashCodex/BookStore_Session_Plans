@@ -1,27 +1,27 @@
-# 📘 Session 13: Centralized Error Handling & Logging in Spring Boot
+# 📘 Session 14: Structured Logging with SLF4J & Logback in Spring Boot
 
-> **Project Context:** BookMart – As the application grows, consistent and clear error responses become critical. We will implement a centralized error handler and introduce production-grade logging using SLF4J.
+> **Project Context:** BookMart – Logging is no longer optional in modern backend systems. We need clear, structured, and consistent logs for tracking API behavior, performance, and security — especially across distributed systems.
 
+---
 
 ## 🎯 1. Main Project (PBL Context)
 
-BookMart now handles user login, book management, and role-based access.  
-But how should the system respond to errors like:
-- Invalid input?
-- Missing book?
-- Authentication failure?
-
-This session ensures:
-- Consistent error response format (status, message, timestamp)
-- Centralized error handler using `@ControllerAdvice`
-- Logging every major error/action in production format
+In BookMart, we’ve built multiple REST APIs (books, users, orders).  
+To trace actions, debug issues, and prepare for production readiness:
+- We will implement **structured logging** using `SLF4J` + `Logback`
+- Introduce **log levels**, **correlation IDs** (like `X-Request-ID`), and 
+- Log every request and response using **Filters or Interceptors**
 
 ---
 
 ## 🔍 2. Today’s Problem Statement (PSBL)
 
 **Problem:**  
-> Create a centralized way to handle all exceptions using `@ControllerAdvice`, return meaningful JSON error responses with metadata, and log errors with timestamps and traceability.
+> Add a logging mechanism that captures:
+> - All incoming HTTP requests and outgoing responses
+> - Correlation IDs for tracking across logs
+> - Log format that is production-friendly (timestamp, level, message)
+> - Structured log messages using SLF4J and Logback
 
 ---
 
@@ -29,208 +29,189 @@ This session ensures:
 
 By the end of this session, learners will:
 
-- ✅ Understand why centralized error handling is important
-- ✅ Implement `@ControllerAdvice` with `@ExceptionHandler`
-- ✅ Return structured error response: timestamp, status, message, path
-- ✅ Log key actions and errors using `SLF4J` (`@Slf4j` or `Logger`)
-- ✅ Separate client-friendly vs internal error messages
+- ✅ Use `SLF4J` with `@Slf4j` or `LoggerFactory`
+- ✅ Set up custom log patterns in `logback-spring.xml`
+- ✅ Create a `Filter` to log all HTTP requests/responses
+- ✅ Generate correlation/request IDs (UUID) per request
+- ✅ Follow log level best practices (`info`, `debug`, `error`)
 
 ---
 
 ## 🧠 4. Scenario-Based Framing
 
-> A Buyer requests a non-existent book ID → API returns:
-```json
-{
-  "timestamp": "2025-07-12T10:22:00",
-  "status": 404,
-  "error": "Not Found",
-  "message": "Book not found with ID: 999",
-  "path": "/api/books/999"
-}
-````
+> A buyer places an order.  
+> The API request/response is logged with a **Request ID** like `REQ-123456`, along with:
+- Method (POST)
+- Path (`/api/orders`)
+- Timestamp
+- Status code (201)
 
-Instead of a stack trace or generic server error, the response is:
-
-* Consistent
-* JSON formatted
-* Developer-friendly for frontend integration
-* Logged for backend audit
+This makes it easier to:
+- Debug issues
+- Correlate logs across microservices
+- Monitor traffic
 
 ---
 
 ## 🗺️ 5. Mini Visual Roadmap
 
 ```text
-📦 Exception Thrown (e.g., BookNotFoundException)
-   ↓
-🎯 GlobalExceptionHandler (@ControllerAdvice)
-   ↓
-🧾 Standardized ErrorResponse returned
-   ↓
-📑 Logged with timestamp, path, error
-```
+📦 Incoming Request
+  ↓
+🔍 Filter adds Request ID → Logs method, URI, body
+  ↓
+🧾 Controller handles logic
+  ↓
+📤 Filter logs response status, body
+  ↓
+📝 Logged to console/file via SLF4J & Logback
+````
 
 ---
 
 ## 📚 6. Conceptual Explanation
 
-### 📘 What is `@ControllerAdvice`?
+### 🔧 SLF4J (Simple Logging Facade for Java)
 
-A special component in Spring that allows:
+* A logging API that allows plugging in any backend (Logback, Log4j, etc.)
+* Spring Boot uses **Logback** by default
 
-* Centralized handling of all controller-level exceptions
-* Reusable logic for all REST controllers
+### 📘 Log Levels (Best Practices)
 
-### 📘 What is `@ExceptionHandler`?
+| Level   | Use for...                             |
+| ------- | -------------------------------------- |
+| `trace` | Very detailed, for debugging internals |
+| `debug` | Detailed dev info                      |
+| `info`  | Key app events (startup, login, save)  |
+| `warn`  | Something unexpected but recoverable   |
+| `error` | Exceptions, failed logic, etc.         |
 
-Used within `@ControllerAdvice` to define specific methods to handle custom exceptions.
+---
 
-### 📘 Logging Levels (via SLF4J)
+### 📘 Correlation ID
 
-| Level   | When to Use                      |
-| ------- | -------------------------------- |
-| `info`  | Startup, successful ops          |
-| `warn`  | Non-critical issues (deprecated) |
-| `error` | Exceptions, failures             |
+* Unique ID per request
+* Helps trace full lifecycle of a request
+* Usually passed as a header: `X-Request-ID`
 
 ---
 
 ## 💻 7. Hands-On Implementation
 
-### ✅ Create ErrorResponse.java
+### ✅ Step 1: Add `RequestLoggingFilter.java`
 
 ```java
-public class ErrorResponse {
-    private LocalDateTime timestamp;
-    private int status;
-    private String error;
-    private String message;
-    private String path;
+@Component
+@Order(1)
+public class RequestLoggingFilter implements Filter {
 
-    // Constructors, Getters & Setters
-}
-```
+    private static final Logger log = LoggerFactory.getLogger(RequestLoggingFilter.class);
 
----
+    @Override
+    public void doFilter(ServletRequest request, ServletResponse response, FilterChain chain)
+            throws IOException, ServletException {
 
-### ✅ Custom Exception: BookNotFoundException.java
+        HttpServletRequest req = (HttpServletRequest) request;
+        HttpServletResponse res = (HttpServletResponse) response;
 
-```java
-public class BookNotFoundException extends RuntimeException {
-    public BookNotFoundException(String message) {
-        super(message);
+        String requestId = UUID.randomUUID().toString();
+        req.setAttribute("X-Request-ID", requestId);
+
+        log.info("[{}] → {} {}", requestId, req.getMethod(), req.getRequestURI());
+
+        chain.doFilter(request, response);
+
+        log.info("[{}] ← {} {}", requestId, res.getStatus(), req.getRequestURI());
     }
 }
 ```
 
 ---
 
-### ✅ GlobalExceptionHandler.java
+### ✅ Step 2: Use `@Slf4j` in Controllers/Services
 
 ```java
-@RestControllerAdvice
 @Slf4j
-public class GlobalExceptionHandler {
+@RestController
+@RequestMapping("/api/orders")
+public class OrderController {
 
-    @ExceptionHandler(BookNotFoundException.class)
-    public ResponseEntity<ErrorResponse> handleBookNotFound(BookNotFoundException ex, HttpServletRequest request) {
-        ErrorResponse err = new ErrorResponse(
-            LocalDateTime.now(),
-            HttpStatus.NOT_FOUND.value(),
-            "Not Found",
-            ex.getMessage(),
-            request.getRequestURI()
-        );
-
-        log.error("BookNotFoundException: {}", ex.getMessage());
-        return new ResponseEntity<>(err, HttpStatus.NOT_FOUND);
-    }
-
-    @ExceptionHandler(Exception.class)
-    public ResponseEntity<ErrorResponse> handleGeneric(Exception ex, HttpServletRequest request) {
-        ErrorResponse err = new ErrorResponse(
-            LocalDateTime.now(),
-            HttpStatus.INTERNAL_SERVER_ERROR.value(),
-            "Internal Server Error",
-            "An unexpected error occurred",
-            request.getRequestURI()
-        );
-
-        log.error("Unhandled Exception: {}", ex.getMessage(), ex);
-        return new ResponseEntity<>(err, HttpStatus.INTERNAL_SERVER_ERROR);
+    @PostMapping
+    public ResponseEntity<String> placeOrder(@RequestBody OrderDto order) {
+        log.info("Placing new order for userId: {}", order.getUserId());
+        return ResponseEntity.status(HttpStatus.CREATED).body("Order Placed");
     }
 }
 ```
 
 ---
 
-### ✅ Example in BookController.java
+### ✅ Step 3: Customize `logback-spring.xml`
 
-```java
-@GetMapping("/{id}")
-public ResponseEntity<BookDto> getBookById(@PathVariable int id) {
-    BookDto book = bookService.getBookById(id)
-        .orElseThrow(() -> new BookNotFoundException("Book not found with ID: " + id));
-    return ResponseEntity.ok(book);
-}
-```
-
----
-
-### ✅ Logging Format in `logback-spring.xml` (optional for advanced setup)
+Place inside `src/main/resources`:
 
 ```xml
-<pattern>
-  %d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n
-</pattern>
+<configuration>
+
+    <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>
+                %d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n
+            </pattern>
+        </encoder>
+    </appender>
+
+    <root level="info">
+        <appender-ref ref="STDOUT" />
+    </root>
+
+</configuration>
 ```
 
 ---
 
 ## 📤 8. Output-Based Assessment
 
-| ✅ Task                            | 💬 Expected Outcome               |
-| --------------------------------- | --------------------------------- |
-| Error response structured         | JSON with status, timestamp, path |
-| BookNotFoundException returns 404 | With message and URI              |
-| All exceptions logged with SLF4J  | Shown in console or logs          |
-| GitHub push complete              | `feature/error-handling-logging`  |
+| ✅ Task                          | 💬 Expected Outcome                         |
+| ------------------------------- | ------------------------------------------- |
+| Logs show method + URI + status | `[REQ-1234] → POST /api/orders`             |
+| Correlation ID is consistent    | Same request ID for both request & response |
+| `@Slf4j` logs controller logic  | Message shown in logs                       |
+| Logback format is clean         | Timestamp, level, logger, message           |
+| GitHub push complete            | `feature/logging-correlation-id`            |
 
 ---
 
 ## 🎯 9. Interview Preparation
 
-### Q1. What is `@ControllerAdvice`?
+### Q1. What is SLF4J and why is it used?
 
-> A Spring component that handles exceptions globally for all controllers.
+> It's a facade for various logging frameworks. Spring Boot uses it with Logback for structured, high-performance logging.
 
-### Q2. Why centralize error handling?
+### Q2. What are common logging best practices?
 
-> Avoids repetition, ensures consistent response structure, and simplifies debugging.
+> Use proper levels, avoid logging sensitive data, add correlation IDs, format consistently.
 
-### Q3. What should an API error response include?
+### Q3. How do you log HTTP requests/responses?
 
-> Timestamp, status, message, request path.
+> Use Spring filters or interceptors to capture and log details like path, status, headers.
 
-### Q4. How do you log exceptions in Spring Boot?
+### Q4. What’s the purpose of correlation/request ID?
 
-> Use SLF4J (`@Slf4j`) and log at `error` or `warn` level depending on severity.
+> To track a request across logs (especially in distributed systems or microservices).
 
 ---
 
 ## 🔄 10. Connection to the Next Problem Statement
 
-With strong error handling and logging in place, we’re ready to build a production-grade backend. Next, we'll move to:
+Now that BookMart logs requests/responses with full traceability, we’ll move on to:
 
-* **Pagination**
-* **Sorting**
-* **Filtering**
-  …all using Spring Data JPA — enabling scalable data access for large book collections.
+* Building full-featured **CRUD operations** with
+* **Pagination**, **Sorting**, and **Filtering** using Spring Data JPA.
 
 ---
 
 ## ✅ Next Topic:
 
-### Session 14 → Full CRUD + Pagination, Sorting & Filtering using Spring Data JPA in BookMart
+### Session 15 → CRUD + Pagination, Sorting & Filtering using Spring Data JPA (Books & Users)
 
