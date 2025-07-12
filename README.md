@@ -1,25 +1,24 @@
-# 📘 Session 17: Spring Data Repositories with JPA in BookMart
+# 📘 Session 18: Custom Queries, Validation & Schema Design Best Practices
 
-> **Project Context:** BookMart – Now that we've defined our entities and mapped them to a PostgreSQL database, we will use **Spring Data JPA repositories** to access and manipulate data using **predefined and custom query methods**.
+> **Project Context:** BookMart – As our system grows, we need more control over queries, validation of user inputs, and thoughtful schema design for performance and clarity.
 
 ---
 
 ## 🎯 1. Main Project (PBL Context)
 
-BookMart includes entities like `User`, `Book`, and `Order`.  
-These need robust backend CRUD functionality. Instead of writing SQL or boilerplate DAO code, Spring Data provides **out-of-the-box repository interfaces**.
+We now support basic CRUD using `JpaRepository`.  
+In this session, we:
 
-Today we:
-- Use `JpaRepository` and `CrudRepository`
-- Implement data access logic for Books, Users, and Orders
-- Leverage query method naming conventions like `findByCategory()`
+- Use `@Query` to write **JPQL or native SQL queries**
+- Enforce **input validation** at the DTO layer
+- Apply **database schema best practices** for long-term maintainability and scalability
 
 ---
 
 ## 🔍 2. Today’s Problem Statement (PSBL)
 
 **Problem:**  
-> Implement persistent storage for all entities using Spring Data JPA repositories and build essential CRUD operations using auto-implemented query methods like `findById`, `save`, `deleteById`, and `existsById`.
+> Developers must often go beyond auto-implemented repository methods. We’ll implement advanced queries with `@Query`, secure input validation using annotations, and follow schema standards to ensure performance and consistency.
 
 ---
 
@@ -27,185 +26,195 @@ Today we:
 
 By the end of this session, learners will:
 
-- ✅ Understand what `CrudRepository`, `JpaRepository` offer
-- ✅ Create interfaces for `BookRepository`, `UserRepository`, `OrderRepository`
-- ✅ Use built-in methods like `save()`, `deleteById()`, `findAll()`, `existsById()`
-- ✅ Write custom query methods using naming conventions
-- ✅ Use repository methods inside service classes cleanly
+- ✅ Write custom JPQL and native SQL queries using `@Query`
+- ✅ Understand the difference between JPQL and native SQL
+- ✅ Use validation annotations like `@NotNull`, `@Size`, `@Pattern`
+- ✅ Apply `@Valid` at the controller level
+- ✅ Recognize schema design best practices (naming, indexing, normalization)
 
 ---
 
 ## 🧠 4. Scenario-Based Framing
 
-> In BookMart, a Seller wants to:
-- List all their books → `findByOwnerId(Integer id)`
-- Delete a book → `deleteById(Integer bookId)`
-- Check if a book exists before updating → `existsById(Integer id)`
+> Imagine BookMart allows search by title patterns or price ranges:
+- `findBooksByTitleContaining(String keyword)`
+- `getTop5BooksByPriceDesc()`
 
-With Spring Data JPA, all of this can be done with **no SQL** or **manual DAO**.
+We also want to validate incoming data:
+- Title should not be empty
+- Price must be positive
+- ISBN must match a regex pattern
+
+Without this, we risk saving **incomplete or incorrect** data.
 
 ---
 
 ## 🗺️ 5. Mini Visual Roadmap
 
 ```text
-📦 BookService
-  ↓
-🧠 BookRepository extends JpaRepository
-  ↓
-🔄 Auto-query methods → DB via Hibernate
-  ↓
-📚 PostgreSQL stores + retrieves entities
+📦 Controller
+  ↓ @Valid + BookDto (with @Size, @NotNull)
+🧠 BookService
+  ↓ BookRepository → @Query (JPQL/SQL)
+🗃️ DB: schema follows naming/index/normalization rules
 ````
 
 ---
 
 ## 📚 6. Conceptual Explanation
 
-### 📘 CrudRepository vs JpaRepository
+### 🧩 Custom Queries with `@Query`
 
-| Interface        | Features                                |
-| ---------------- | --------------------------------------- |
-| `CrudRepository` | Basic CRUD methods (`save`, `findById`) |
-| `JpaRepository`  | CRUD + Pagination + Sorting + Flush     |
+* **JPQL (Java Persistence Query Language)**: Entity-based (not table-based)
+* **Native SQL**: Raw SQL, for performance or DB-specific syntax
 
-> Use `JpaRepository` in most Spring Boot apps.
+```java
+@Query("SELECT b FROM Book b WHERE b.title LIKE %:keyword%")
+List<Book> searchByTitleKeyword(@Param("keyword") String keyword);
+
+@Query(value = "SELECT * FROM books WHERE price > :price", nativeQuery = true)
+List<Book> findBooksCostlierThan(@Param("price") double price);
+```
 
 ---
 
-### 🛠️ Common Auto-Implemented Methods
+### 🔐 Input Validation
 
-| Method           | Purpose                |
-| ---------------- | ---------------------- |
-| `findById(id)`   | Fetch one entity by ID |
-| `findAll()`      | Get all records        |
-| `save(entity)`   | Insert or update       |
-| `deleteById(id)` | Delete by ID           |
-| `existsById(id)` | Check if record exists |
-| `count()`        | Total record count     |
+| Annotation        | Purpose                                  |
+| ----------------- | ---------------------------------------- |
+| `@NotNull`        | Field cannot be null                     |
+| `@Size(min, max)` | Validates string/collection size         |
+| `@Min`, `@Max`    | Numeric range                            |
+| `@Pattern`        | Regex validation                         |
+| `@Email`          | Must be a valid email format             |
+| `@Valid`          | Triggers validation for nested/DTO input |
+
+---
+
+### 🧱 Schema Design Best Practices
+
+| Concept                | Best Practice Example                       |
+| ---------------------- | ------------------------------------------- |
+| Naming Conventions     | snake\_case for tables/columns (`book_id`)  |
+| Indexing               | Add indexes on `title`, `category`, `price` |
+| Primary Key Convention | Always use surrogate key (`id` AUTO\_GEN)   |
+| Normalization          | Separate entities (Book, User, Order)       |
+| Denormalization (when) | Use for read-heavy & fast retrieval needs   |
 
 ---
 
 ## 💻 7. Hands-On Implementation
 
-### ✅ Step 1: Define BookRepository
+### ✅ Step 1: Custom JPQL Query in BookRepository
 
 ```java
-@Repository
-public interface BookRepository extends JpaRepository<Book, Integer> {
+@Query("SELECT b FROM Book b WHERE b.category = :cat AND b.price < :price")
+List<Book> findBooksByCategoryAndPriceLessThan(@Param("cat") String category, @Param("price") double price);
+```
 
-    List<Book> findByCategory(String category);
+---
 
-    List<Book> findByOwnerId(Integer ownerId);
+### ✅ Step 2: Native SQL Query
 
-    boolean existsByTitle(String title);
+```java
+@Query(value = "SELECT * FROM books ORDER BY price DESC LIMIT 5", nativeQuery = true)
+List<Book> getTop5ExpensiveBooks();
+```
+
+---
+
+### ✅ Step 3: Validation in DTO
+
+```java
+public class BookDto {
+
+    private Integer id;
+
+    @NotNull(message = "Title cannot be null")
+    @Size(min = 3, message = "Title must be at least 3 characters")
+    private String title;
+
+    @Min(value = 0, message = "Price must be positive")
+    private double price;
+
+    @NotBlank
+    private String category;
+
+    @Pattern(regexp = "\\d{3}-\\d{10}", message = "ISBN format is invalid")
+    private String isbn;
+
+    private Integer ownerId;
 }
 ```
 
 ---
 
-### ✅ Step 2: Define UserRepository
+### ✅ Step 4: Use `@Valid` in Controller
 
 ```java
-@Repository
-public interface UserRepository extends JpaRepository<User, Integer> {
-
-    Optional<User> findByName(String name);
-
-    boolean existsByName(String name);
+@PostMapping
+public ResponseEntity<BookDto> createBook(@RequestBody @Valid BookDto dto) {
+    Book book = bookService.save(dto);
+    return new ResponseEntity<>(convertToDto(book), HttpStatus.CREATED);
 }
 ```
 
 ---
 
-### ✅ Step 3: Define OrderRepository
+### ✅ Step 5: Add Indexes (PostgreSQL example)
 
-```java
-@Repository
-public interface OrderRepository extends JpaRepository<Order, Integer> {
-
-    List<Order> findByBuyerId(Integer buyerId);
-
-    List<Order> findByBookId(Integer bookId);
-}
-```
-
----
-
-### ✅ Step 4: Use in Service Layer
-
-```java
-@Service
-public class BookServiceImpl implements BookService {
-
-    @Autowired
-    private BookRepository bookRepo;
-
-    @Override
-    public List<BookDto> getBooksByCategory(String category) {
-        List<Book> books = bookRepo.findByCategory(category);
-        return books.stream().map(this::convertToDto).toList();
-    }
-
-    @Override
-    public boolean bookExists(int id) {
-        return bookRepo.existsById(id);
-    }
-
-    @Override
-    public void deleteBook(int id) {
-        bookRepo.deleteById(id);
-    }
-
-    private BookDto convertToDto(Book book) {
-        return new BookDto(book.getId(), book.getTitle(), book.getPrice(), book.getOwner().getId());
-    }
-}
+```sql
+CREATE INDEX idx_books_title ON books(title);
+CREATE INDEX idx_books_category_price ON books(category, price);
 ```
 
 ---
 
 ## 📤 8. Output-Based Assessment
 
-| ✅ Task                                | 💬 Expected Outcome                    |
-| ------------------------------------- | -------------------------------------- |
-| `findById`, `save`, `delete` work     | Book saved, fetched, deleted from DB   |
-| Custom methods work (`findByOwnerId`) | Returns only seller's books            |
-| Exists check works                    | `existsByTitle("Java")` returns `true` |
-| GitHub push complete                  | `feature/spring-data-repositories`     |
+| ✅ Task                             | 💬 Expected Outcome                      |
+| ---------------------------------- | ---------------------------------------- |
+| Custom query returns expected data | Filtered results using JPQL/SQL          |
+| Invalid input rejected             | Returns 400 with field-level errors      |
+| Index improves query speed         | Explain plan shows index usage           |
+| GitHub push complete               | `feature/custom-query-validation-schema` |
 
 ---
 
 ## 🎯 9. Interview Preparation
 
-### Q1. What is `JpaRepository`?
+### Q1. What is the difference between JPQL and native SQL?
 
-> A Spring Data interface that provides CRUD, pagination, sorting, and query generation for JPA-based persistence.
+> JPQL uses entity names/fields; SQL uses raw table and column names.
 
-### Q2. What happens when you call `findById(id)`?
+### Q2. What is `@Valid` used for?
 
-> Spring auto-generates a SQL query using JPA to fetch the record by primary key.
+> It triggers validation logic for a method parameter (usually a DTO).
 
-### Q3. What’s the benefit of extending Spring Data repositories?
+### Q3. Why is indexing important in DB schema?
 
-> No need to write boilerplate code — methods are generated based on method names.
+> It speeds up SELECT queries by avoiding full table scans.
 
-### Q4. How are custom queries created in Spring Data?
+### Q4. When should we denormalize?
 
-> By defining method names like `findByCategory`, Spring parses the name and builds the query automatically.
+> When performance is critical and data redundancy is acceptable (e.g., read-optimized systems).
 
 ---
 
 ## 🔄 10. Connection to the Next Problem Statement
 
-With repositories in place, we’re now ready to:
+We’ve now:
 
-* Build full CRUD controllers
-* Implement **Pagination**, **Sorting**, and **Filtering**
-* Handle **partial updates** with PATCH
+* Mastered Spring Data's auto and custom query capabilities
+* Validated data entry using annotations
+* Applied schema best practices
+
+Next, we build:
+
+* **Pagination**, **Sorting**, and **Filtering** APIs with `Pageable`
 
 ---
 
 ## ✅ Next Topic:
 
-### Session 18 → Full CRUD + Pagination, Sorting, and Filtering for Book and Order APIs
+### Session 19 → Implementing Pagination, Sorting & Filtering APIs with Spring Data
